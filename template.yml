@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: SAM pizzeria demo application
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Parameters:
+    # For Amplify Console frontend hosting
+    # RepositoryURL:
+    #   Type: String
+    #   Description: Frontend repository URL
+    #   Default: https://git-codecommit.eu-north-1.amazonaws.com/v1/repos/
+    # ProdBranch:
+    #   Type: String
+    #   Description: Production branch in repository
+    #   Default: main
+    # DevBranch:
+    #   Type: String
+    #   Description: Development branch in repository
+    #   Default: dev
+
+Globals:
+    Function:
+        Runtime: nodejs18.x
+        Timeout: 5
+        MemorySize: 128
+        Tracing: Active
+        Environment:
+            Variables:
+                LOGLEVEL: DEBUG
+
+Resources:
+    # DynamoDB table
+    PizzaTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            TableName: pizzaService-table
+            KeySchema:
+                - AttributeName: id
+                  KeyType: HASH
+            AttributeDefinitions:
+                - AttributeName: id
+                  AttributeType: S
+            ProvisionedThroughput:
+                ReadCapacityUnits: 5
+                WriteCapacityUnits: 5
+            SSESpecification:
+                SSEEnabled: true
+
+    # Rest API
+    PizzaApi:
+        Type: AWS::Serverless::Api
+        Properties:
+            Name: pizzaService-api
+            StageName: prod
+            TracingEnabled: true
+            Cors:
+                AllowOrigin: "'*'"
+                AllowMethods: "'OPTIONS,HEAD,GET,PUT,POST,DELETE'"
+                AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+
+    # Functions
+    GetPizzaFunction:
+        Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            Architectures:
+                - x64
+            MemorySize: 264
+            Handler: ./dist/pizzaService/get-pizza.handler
+            Tracing: Active
+            Policies:
+                - DynamoDBReadPolicy:
+                      TableName: !Ref PizzaTable
+            Environment:
+                Variables:
+                    TABLE_NAME: !Ref PizzaTable
+                    AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+            Layers:
+                - !Ref LibShared
+            Events:
+                GetItem:
+                    Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+                    Properties:
+                        Path: /item/{id}
+                        Method: get
+                        RestApiId: !Ref PizzaApi
+
+    GetAllPizzasFunction:
+        Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            Handler: ./dist/pizzaService/get-all-pizzas.handler
+            Tracing: Active
+            Policies:
+                - DynamoDBReadPolicy:
+                      TableName: !Ref PizzaTable
+            Environment:
+                Variables:
+                    TABLE_NAME: !Ref PizzaTable
+                    AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+            Layers:
+                - !Ref LibShared
+            Events:
+                GetItem:
+                    Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+                    Properties:
+                        Path: /item
+                        Method: get
+                        RestApiId: !Ref PizzaApi
+
+    PutPizzaFunction:
+        Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            Handler: ./dist/pizzaService/put-pizza.handler
+            Tracing: Active
+            Policies:
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref PizzaTable
+            Environment:
+                Variables:
+                    TABLE_NAME: !Ref PizzaTable
+                    AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+            Layers:
+                - !Ref LibShared
+            Events:
+                PutItem:
+                    Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+                    Properties:
+                        Path: /item
+                        Method: POST
+                        RestApiId: !Ref PizzaApi
+                UpdateItem:
+                    Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+                    Properties:
+                        Path: /item/{id}
+                        Method: PUT
+                        RestApiId: !Ref PizzaApi
+
+    DeletePizzaFunction:
+        Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            Handler: ./dist/pizzaService/delete-pizza.handler
+            Tracing: Active
+            Policies:
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref PizzaTable
+            Environment:
+                Variables:
+                    TABLE_NAME: !Ref PizzaTable
+                    AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+            Layers:
+                - !Ref LibShared
+            Events:
+                DeleteItem:
+                    Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+                    Properties:
+                        Path: /item/{id}
+                        Method: DELETE
+                        RestApiId: !Ref PizzaApi
+
+    # Shared layer
+    LibShared:
+        Type: AWS::Serverless::LayerVersion
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            Description: Shared dependencies for Lambdas
+            ContentUri: ./
+            CompatibleRuntimes:
+                - nodejs16.x
+
+    # Amplify console hosting for SSR website if you would like to
+    # attach the service to a web frontend like next.
+    # AmplifyRole:
+    #   Type: AWS::IAM::Role
+    #   Condition: AmplifyDeployment
+    #   Properties:
+    #     AssumeRolePolicyDocument:
+    #       Version: 2012-10-17
+    #       Statement:
+    #         - Effect: Allow
+    #           Principal:
+    #             Service:
+    #               - amplify.amazonaws.com
+    #               - codecommit.amazonaws.com
+    #           Action:
+    #             - sts:AssumeRole
+    #     Policies:
+    #       - PolicyName: Amplify
+    #         PolicyDocument:
+    #           Version: 2012-10-17
+    #           Statement:
+    #             - Effect: Allow
+    #               Action: "amplify:*"
+    #               Resource: "*"
+    #       - PolicyName: Codecommit
+    #         PolicyDocument:
+    #           Version: 2012-10-17
+    #           Statement:
+    #             - Effect: Allow
+    #               Action: "codecommit:*"
+    #               Resource: "*"
+
+    # AmplifyApp:
+    #   Type: "AWS::Amplify::App"
+    #   Properties:
+    #     Name: pizzaService-amplify
+    #     Description: Amplify frontend hosting for pizzaService
+    #     Repository: !Ref RepositoryURL
+    #     Platform: WEB_COMPUTE
+    #     BuildSpec: |-
+    #       version: 1
+    #       frontend:
+    #         phases:
+    #           preBuild:
+    #             commands:
+    #               - npm ci
+    #           build:
+    #             commands:
+    #               - npm run build
+    #         artifacts:
+    #           baseDirectory: .next
+    #           files:
+    #             - '**/*'
+    #         cache:
+    #           paths:
+    #             - node_modules/**/*
+    #     IAMServiceRole: !GetAtt AmplifyRole.Arn
+
+    # AmplifyBranchProd:
+    #   Type: AWS::Amplify::Branch
+    #   Properties:
+    #     BranchName: !Ref ProdBranch
+    #     AppId: !GetAtt AmplifyApp.AppId
+    #     Description: Amplify console prod branch
+    #     EnableAutoBuild: true
+    #     Stage: PRODUCTION
+    #     Tags:
+    #       - Key: Environment
+    #         Value: prod
+
+    # AmplifyBranchDev:
+    #   Type: AWS::Amplify::Branch
+    #   Condition: AmplifyDeployment
+    #   Properties:
+    #     BranchName: !Ref DevBranch
+    #     AppId: !GetAtt AmplifyApp.AppId
+    #     Description: Amplify console dev branch
+    #     EnableAutoBuild: true
+    #     EnablePerformanceMode: true
+    #     Stage: DEVELOPMENT
+    #     Tags:
+    #       - Key: Environment
+    #         Value: dev
+
+Outputs:
+    # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+    # Find out more about other implicit resources you can reference within SAM
+    # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+    PizzaApiUrl:
+        Description: API Gateway endpoint URL
+        Value: !Sub "https://${PizzaApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    # AmplifyURL:
+    #   Description: Amplify hosting URL
+    #   Value: !Join ["", ["https://", !GetAtt AmplifyBranchProd.BranchName, ".", !GetAtt AmplifyApp.DefaultDomain]]
