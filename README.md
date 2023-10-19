@@ -7,4 +7,4 @@ a DynamoDB table
 
 Deploy to AWS using the SAM cli  
 sam build  
-sam deploy --guidded
+sam deploy --guided
